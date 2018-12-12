@@ -1774,25 +1774,45 @@ namespace FFXIV_TexTools2.IO
                             continue;
                         }
 
+                        // Scan through all the table row-offsets
                         for (int i = 0; i < offsetTableSize; i += 8)
                         {
+                            var debugMap = new Dictionary<string, byte[]>();
                             br.BaseStream.Seek(i + 32, SeekOrigin.Begin);
+
+                            // Row Number
                             int index = BitConverter.ToInt32(br.ReadBytes(4).Reverse().ToArray(), 0);
+
+                            // Memory offset
                             int tableOffset = BitConverter.ToInt32(br.ReadBytes(4).Reverse().ToArray(), 0);
 
                             br.BaseStream.Seek(tableOffset, SeekOrigin.Begin);
+                            
+                            // Size of Entry.
                             int entrySize = BitConverter.ToInt32(br.ReadBytes(4).Reverse().ToArray(), 0);
-                            br.ReadBytes(16);
-                            int lastText = BitConverter.ToInt16(br.ReadBytes(2).Reverse().ToArray(), 0);
-                            br.ReadBytes(3);
 
-                            if (lastText > 10)
+                            debugMap.Add("after size", br.ReadBytes(2));
+
+                            var startOfEntry = br.BaseStream.Position;
+                            debugMap.Add("start", br.ReadBytes(6));
+
+                            int endOfLowercaseString = BitConverter.ToInt16(br.ReadBytes(2).Reverse().ToArray(), 0);
+                            debugMap.Add("after lower offset", br.ReadBytes(2));
+
+                            int endOfPluralString = BitConverter.ToInt16(br.ReadBytes(2).Reverse().ToArray(), 0);
+                            debugMap.Add("after plural offset", br.ReadBytes(2));
+
+                            // Offset in the string block to the capitalized Name
+                            int capitalizedNameOffset = BitConverter.ToInt16(br.ReadBytes(2).Reverse().ToArray(), 0);
+                            debugMap.Add("after last text 1", br.ReadBytes(3));
+
+                            if (capitalizedNameOffset > 10)
                             {
                                 item = new ItemData();
                                 TreeNode category = new TreeNode();
 
                                 bool hasSecondary = false;
-                                br.ReadBytes(7);
+                                debugMap.Add("after last text 2", br.ReadBytes(7));
                                 byte[] textureDetails = br.ReadBytes(4).ToArray();
                                 int itemCheck = textureDetails[3];
 
@@ -1810,7 +1830,7 @@ namespace FFXIV_TexTools2.IO
                                     }
 
                                     item.PrimaryModelID = BitConverter.ToInt16(br.ReadBytes(2).Reverse().ToArray(), 0).ToString().PadLeft(4, '0');
-                                    br.ReadBytes(2);
+                                    debugMap.Add("after modelId", br.ReadBytes(2));
 
                                     textureDetails = br.ReadBytes(4).ToArray();
                                     int secondaryCheck = textureDetails[3];
@@ -1829,33 +1849,50 @@ namespace FFXIV_TexTools2.IO
                                         }
 
                                         item.SecondaryModelID = BitConverter.ToInt16(br.ReadBytes(2).Reverse().ToArray(), 0).ToString().PadLeft(4, '0');
-                                        br.ReadBytes(2);
+                                        debugMap.Add("after secondary modelId", br.ReadBytes(2));
                                     }
 
                                     int icon = 0;
 
                                     if (!hasSecondary)
                                     {
-                                        br.ReadBytes(98);
-                                        icon = BitConverter.ToUInt16(br.ReadBytes(2).Reverse().ToArray(), 0);
+                                        debugMap.Add("Secondary Skip Block", br.ReadBytes(4));
                                     }
-                                    else
-                                    {
-                                        br.ReadBytes(94);
-                                        icon = BitConverter.ToUInt16(br.ReadBytes(2).Reverse().ToArray(), 0);
-                                    }
+
+                                    debugMap.Add("big block", br.ReadBytes(94));
+                                    icon = BitConverter.ToUInt16(br.ReadBytes(2).Reverse().ToArray(), 0);
 
                                     item.Icon = icon.ToString();
 
-                                    br.ReadBytes(16);
+                                    debugMap.Add("after icon", br.ReadBytes(16));
 
                                     byte[] slotBytes = br.ReadBytes(4).ToArray();
                                     item.ItemCategory = slotBytes[0].ToString();
 
-                                    br.ReadBytes(2);
-                                    br.ReadBytes(lastText);
+                                    debugMap.Add("after slot", br.ReadBytes(2));
 
-                                    var name = Encoding.UTF8.GetString(br.ReadBytes(entrySize - (lastText + 160))).Replace("\0", "");
+                                    var startOfStringBlock = br.BaseStream.Position;
+                                    int relativeStartOfStringBlock = (int)(startOfStringBlock - (tableOffset + 2));
+
+
+                                    var lowerCaseName = Encoding.UTF8.GetString(br.ReadBytes(endOfLowercaseString - 1));
+
+                                    // There's a buffer byte here.
+                                    var buffer1 = br.ReadByte();
+                                    
+                                    var pluralName = Encoding.UTF8.GetString(br.ReadBytes(endOfPluralString - (endOfLowercaseString) - 1));
+
+                                    var startOfLastString = startOfStringBlock + capitalizedNameOffset;
+                                    br.BaseStream.Seek(startOfLastString, SeekOrigin.Begin);
+
+                                    var rest = (int)((startOfEntry + entrySize) - br.BaseStream.Position);
+                                    var readSize = (entrySize) - (relativeStartOfStringBlock + capitalizedNameOffset);
+
+
+                                    var fullName = Encoding.UTF8.GetString(br.ReadBytes(rest));
+                                    
+
+                                    var name = fullName.Replace("\0", "");
                                     item.ItemName = new string(name.Where(c => !char.IsControl(c)).ToArray());
 
                                     if (item.ItemCategory.Equals("0") || item.ItemCategory.Equals("1") || item.ItemCategory.Equals("2") || item.ItemCategory.Equals("13") || item.ItemCategory.Equals("14"))
@@ -1927,9 +1964,9 @@ namespace FFXIV_TexTools2.IO
 
                                     br.ReadBytes(7);
 
-                                    br.ReadBytes(lastText);
+                                    br.ReadBytes(capitalizedNameOffset);
 
-                                    var name = Encoding.UTF8.GetString(br.ReadBytes(entrySize - (lastText + 160))).Replace("\0", "");
+                                    var name = Encoding.UTF8.GetString(br.ReadBytes(entrySize - (capitalizedNameOffset + 160))).Replace("\0", "");
                                     item.ItemName = new string(name.Where(c => !char.IsControl(c)).ToArray());
 
                                     item.ItemCategory = Strings.Items;
